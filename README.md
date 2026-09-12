@@ -13,6 +13,7 @@ edited here.
 | `version.json`          | Which vendor tag gets built — `{ "version": "v1.2.1" }`.            |
 | `docs/CHANGELOG.md`     | Release notes; must mention the version being deployed.            |
 | `docs/popis-zmeny.md`   | Description of the change for the approver.                        |
+| `ci/`                   | PowerShell scripts the pipeline steps call.                        |
 
 ## Releasing a version
 
@@ -74,6 +75,35 @@ Approvals and checks are **not** in this file. They are configured on the
 the run pause for an approver.
 
 `trigger: none` — runs are started by hand, so it is always visible who started one.
+
+### `ci/`
+
+Anything longer than a one-liner lives in a script rather than inline in the
+YAML, so it can be run and debugged locally instead of only on an agent.
+
+| Script                   | Called by                          |
+| ------------------------ | ---------------------------------- |
+| `Get-VendorSource.ps1`   | `Build`, `Verify / test`           |
+| `Build-Package.ps1`      | `Build`                            |
+| `Invoke-VendorTests.ps1` | `Verify / test`                    |
+| `Test-Documentation.ps1` | `Verify / docs`                    |
+| `Deploy-Site.ps1`        | `Staging`, `Production`            |
+
+Names follow PowerShell's `Verb-Noun` convention using approved verbs. Each
+takes parameters instead of reading pipeline variables directly — that is what
+makes them runnable outside CI — and reports failures with
+`##vso[task.logissue type=error]` plus a non-zero exit code.
+
+Two of them are shared by more than one step, which is the point: the clone and
+the deployment exist once, and staging and production differ only in the
+arguments they pass.
+
+Reading `version.json` stays inline in the YAML. It sets the stage output
+variable every later stage depends on, and that wiring is easier to follow next
+to the `name: readVersion` that exposes it.
+
+`Deploy-Site.ps1` without `-TargetPath` only lists the package — the workshop
+mode. Adding `-TargetPath \\server\stranka\staging` turns it into a real copy.
 
 ## Not in this repo yet
 

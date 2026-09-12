@@ -29,6 +29,10 @@
 #  Verzia dodávateľa sa NEuvádza tu, ale vo `version.json` vedľa tohto súboru:
 #      { "version": "v1.2.1" }
 #
+#  Dlhšie kroky nie sú inline — sú v `ci\*.ps1`, aby sa dali spustiť a ladiť
+#  aj lokálne, mimo pipeline. Inline ostáva len čítanie `version.json`, ktoré
+#  nastavuje výstupnú premennú stage.
+#
 #  Prečo klonujeme skriptom a nie cez `resources.repositories`:
 #  ref v `resources` sa vyhodnocuje pri kompilácii pipeline, takže sa nedá
 #  načítať zo súboru. Chceme, aby zmena verzie bola zmenou v `version.json`
@@ -79,31 +83,12 @@ stages:
       displayName: Načítanie verzie z version.json
 
     # Ak tag neexistuje, tento krok zlyhá hlasne a hneď — to je dobré zlyhanie.
-    - powershell: |
-        $v   = "$(readVersion.appVersion)"
-        $url = "$(vendorRepoUrl)".Replace("https://", "https://$(System.AccessToken)@")
-        git clone --depth 1 --branch $v $url vendor
-        if ($LASTEXITCODE -ne 0) {
-          Write-Host "##vso[task.logissue type=error]Tag '$v' sa nepodarilo načítať — existuje?"
-          exit 1
-        }
+    - powershell: .\ci\Get-VendorSource.ps1 -Url "$(vendorRepoUrl)" -Tag "$(readVersion.appVersion)"
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
       displayName: Stiahnutie kódu dodávateľa (tag $(readVersion.appVersion))
 
-    - powershell: |
-        $v = "$(readVersion.appVersion)"
-        New-Item -ItemType Directory -Force -Path dist | Out-Null
-        Copy-Item vendor\src\* dist\ -Recurse -Force
-
-        # Verziu zapíšeme do stránky, aby bola viditeľná aj bez otvorenia
-        # pipeline. Keby placeholder chýbal, nahradenie by ticho neurobilo nič
-        # a verzia by sa na stránku nedostala — preto zlyháme hlasne.
-        $page = Get-Content dist\index.html -Raw
-        if ($page -notmatch '__VERSION__') {
-          Write-Host "##vso[task.logissue type=error]dist\index.html neobsahuje __VERSION__ — verzia by sa na stránku nedostala"
-          exit 1
-        }
-        $page.Replace('__VERSION__', $v) | Set-Content dist\index.html -NoNewline
-        Get-ChildItem dist -Recurse | Select-Object FullName
+    - powershell: .\ci\Build-Package.ps1 -Version "$(readVersion.appVersion)"
       displayName: Build — príprava dist/
 
     # Medzivýstup pre ďalšie stage. Ešte nie je overený, preto sa nevolá `app`.
@@ -124,12 +109,13 @@ stages:
   - job: test
     displayName: Automatické testy
     steps:
-    - checkout: none
+    # `self` (nie `none`) — z konfiguračného repozitára potrebujeme `ci\`.
+    - checkout: self
     - download: current
       artifact: build-output
-    - powershell: |
-        $url = "$(vendorRepoUrl)".Replace("https://", "https://$(System.AccessToken)@")
-        git clone --depth 1 --branch $(appVersion) $url vendor
+    - powershell: .\ci\Get-VendorSource.ps1 -Url "$(vendorRepoUrl)" -Tag "$(appVersion)"
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
       displayName: Stiahnutie testov
 
     - task: NodeTool@0
@@ -137,38 +123,14 @@ stages:
         versionSpec: '20.x'
       displayName: Node.js
 
-    - powershell: |
-        # Testy bežia proti tomu, čo sa naozaj zostavilo: `src\` z klonu
-        # nahradíme balíkom z Build (aj s dosadenou verziou). Priečinok najprv
-        # mažeme — `Copy-Item -Recurse` do už existujúceho priečinka vie
-        # podpriečinky zanoriť do seba (`src\hooks\hooks`).
-        Remove-Item vendor\src -Recurse -Force
-        Copy-Item "$(Pipeline.Workspace)\build-output" vendor\src -Recurse -Force
-
-        # `tests\` je v koreni repozitára dodávateľa, aplikácia v `src\`.
-        cd vendor
-        node --test --test-reporter=spec tests\
+    - powershell: .\ci\Invoke-VendorTests.ps1 -PackagePath "$(Pipeline.Workspace)\build-output"
       displayName: Spustenie testov
 
   - job: docs
     displayName: Kontrola dokumentácie
     steps:
     - checkout: self
-    - powershell: |
-        $v = "$(appVersion)"
-        $missing = @()
-        if (-not (Test-Path "docs\CHANGELOG.md"))       { $missing += "docs\CHANGELOG.md" }
-        if (-not (Test-Path "docs\popis-zmeny.md"))     { $missing += "docs\popis-zmeny.md" }
-
-        if ($missing.Count -gt 0) {
-          Write-Host "##vso[task.logissue type=error]Chýba: $($missing -join ', ')"
-          exit 1
-        }
-        if (-not (Select-String -Path "docs\CHANGELOG.md" -Pattern ([regex]::Escape($v)) -Quiet)) {
-          Write-Host "##vso[task.logissue type=error]CHANGELOG.md nespomína verziu $v"
-          exit 1
-        }
-        Write-Host "Dokumentácia k verzii $v je na mieste."
+    - powershell: .\ci\Test-Documentation.ps1 -Version "$(appVersion)"
       displayName: Dokumentácia zodpovedá nasadzovanej verzii
 
     - publish: docs
@@ -210,14 +172,12 @@ stages:
       runOnce:
         deploy:
           steps:
+          # deployment job sám o sebe repozitár nesťahuje — `ci\` si vypýtame.
+          - checkout: self
           - download: current
             artifact: app
-          - powershell: |
-              Write-Host "Nasadzujem verziu $(appVersion) na STAGING"
-              Get-ChildItem "$(Pipeline.Workspace)\app" -Recurse | Select-Object Name, Length
-              # V ostrej prevádzke tu stojí kopírovanie na SMB share, ktorý je
-              # zároveň priečinkom IIS stránky:
-              # xcopy /E /Y "$(Pipeline.Workspace)\app\*" "\\server\stranka\staging\"
+          # V ostrej prevádzke doplniť: -TargetPath \\server\stranka\staging
+          - powershell: .\ci\Deploy-Site.ps1 -Version "$(appVersion)" -EnvironmentName STAGING -PackagePath "$(Pipeline.Workspace)\app"
             displayName: Kopírovanie na staging
 
 # -----------------------------------------------------------------------------
@@ -236,10 +196,10 @@ stages:
       runOnce:
         deploy:
           steps:
+          # deployment job sám o sebe repozitár nesťahuje — `ci\` si vypýtame.
+          - checkout: self
           - download: current
             artifact: app
-          - powershell: |
-              Write-Host "Nasadzujem verziu $(appVersion) do PRODUKCIE"
-              Get-ChildItem "$(Pipeline.Workspace)\app" -Recurse | Select-Object Name, Length
-              # xcopy /E /Y "$(Pipeline.Workspace)\app\*" "\\server\stranka\produkcia\"
+          # V ostrej prevádzke doplniť: -TargetPath \\server\stranka\produkcia
+          - powershell: .\ci\Deploy-Site.ps1 -Version "$(appVersion)" -EnvironmentName PRODUKCIA -PackagePath "$(Pipeline.Workspace)\app"
             displayName: Kopírovanie do produkcie

@@ -45,7 +45,7 @@ variables:
   # Adresa repozitára dodávateľa na jednom mieste. Token sa do nej vkladá až
   # pri klonovaní (`$(System.AccessToken)` za `https://`), aby sa nedostal do
   # premennej ani do logu.
-  vendorRepoUrl: https://dev.azure.com/kooperativa/kalkulacka/_git/kalkulacka-dodavatel
+  vendorRepoUrl: https://adoserver.koop.sk/DefaultCollection/EDU/_git/Dev
 
 stages:
 
@@ -90,12 +90,19 @@ stages:
       displayName: Stiahnutie kódu dodávateľa (tag $(readVersion.appVersion))
 
     - powershell: |
+        $v = "$(readVersion.appVersion)"
         New-Item -ItemType Directory -Force -Path dist | Out-Null
         Copy-Item vendor\src\* dist\ -Recurse -Force
-        # Verziu zapíšeme do stránky, aby bola viditeľná aj bez otvorenia pipeline
-        (Get-Content dist\index.html -Raw) `
-          -replace '__VERSION__', '$(readVersion.appVersion)' |
-          Set-Content dist\index.html
+
+        # Verziu zapíšeme do stránky, aby bola viditeľná aj bez otvorenia
+        # pipeline. Keby placeholder chýbal, nahradenie by ticho neurobilo nič
+        # a verzia by sa na stránku nedostala — preto zlyháme hlasne.
+        $page = Get-Content dist\index.html -Raw
+        if ($page -notmatch '__VERSION__') {
+          Write-Host "##vso[task.logissue type=error]dist\index.html neobsahuje __VERSION__ — verzia by sa na stránku nedostala"
+          exit 1
+        }
+        $page.Replace('__VERSION__', $v) | Set-Content dist\index.html -NoNewline
         Get-ChildItem dist -Recurse | Select-Object FullName
       displayName: Build — príprava dist/
 
@@ -131,7 +138,14 @@ stages:
       displayName: Node.js
 
     - powershell: |
-        Copy-Item "$(Pipeline.Workspace)\build-output\*" vendor\src\ -Recurse -Force
+        # Testy bežia proti tomu, čo sa naozaj zostavilo: `src\` z klonu
+        # nahradíme balíkom z Build (aj s dosadenou verziou). Priečinok najprv
+        # mažeme — `Copy-Item -Recurse` do už existujúceho priečinka vie
+        # podpriečinky zanoriť do seba (`src\hooks\hooks`).
+        Remove-Item vendor\src -Recurse -Force
+        Copy-Item "$(Pipeline.Workspace)\build-output" vendor\src -Recurse -Force
+
+        # `tests\` je v koreni repozitára dodávateľa, aplikácia v `src\`.
         cd vendor
         node --test --test-reporter=spec tests\
       displayName: Spustenie testov

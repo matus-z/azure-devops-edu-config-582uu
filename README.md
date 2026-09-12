@@ -2,7 +2,8 @@
 
 The configuration side of the workshop setup (`kalkulacka-config`). It holds the
 pipeline, the version pointer and the release documentation. The application
-code lives in the vendor repo (`kalkulacka-dodavatel`) and is never edited here.
+code lives in the vendor repo (`EDU/Dev` on `adoserver.koop.sk`) and is never
+edited here.
 
 ## Project structure
 

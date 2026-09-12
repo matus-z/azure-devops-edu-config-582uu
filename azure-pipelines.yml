@@ -42,6 +42,9 @@ pool:
   name: WinAgentPool-Srv2022
 
 variables:
+  # Adresa repozitára dodávateľa na jednom mieste. Token sa do nej vkladá až
+  # pri klonovaní (`$(System.AccessToken)` za `https://`), aby sa nedostal do
+  # premennej ani do logu.
   vendorRepoUrl: https://dev.azure.com/kooperativa/kalkulacka/_git/kalkulacka-dodavatel
 
 stages:
@@ -77,10 +80,9 @@ stages:
 
     # Ak tag neexistuje, tento krok zlyhá hlasne a hneď — to je dobré zlyhanie.
     - powershell: |
-        $v = "$(readVersion.appVersion)"
-        git clone --depth 1 --branch $v `
-          "https://$(System.AccessToken)@dev.azure.com/kooperativa/kalkulacka/_git/kalkulacka-dodavatel" `
-          vendor
+        $v   = "$(readVersion.appVersion)"
+        $url = "$(vendorRepoUrl)".Replace("https://", "https://$(System.AccessToken)@")
+        git clone --depth 1 --branch $v $url vendor
         if ($LASTEXITCODE -ne 0) {
           Write-Host "##vso[task.logissue type=error]Tag '$v' sa nepodarilo načítať — existuje?"
           exit 1
@@ -119,9 +121,8 @@ stages:
     - download: current
       artifact: build-output
     - powershell: |
-        git clone --depth 1 --branch $(appVersion) `
-          "https://$(System.AccessToken)@dev.azure.com/kooperativa/kalkulacka/_git/kalkulacka-dodavatel" `
-          vendor
+        $url = "$(vendorRepoUrl)".Replace("https://", "https://$(System.AccessToken)@")
+        git clone --depth 1 --branch $(appVersion) $url vendor
       displayName: Stiahnutie testov
 
     - task: NodeTool@0

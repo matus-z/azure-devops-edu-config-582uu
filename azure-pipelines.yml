@@ -61,6 +61,11 @@ stages:
   jobs:
   - job: build
     displayName: Zostavenie aplikácie
+    # Agenti v pooli sú vlastné stroje a workspace sa medzi behmi recykluje.
+    # Bez tohto by `git clone ... vendor` pri druhom behu zlyhal na tom, že
+    # priečinok už existuje — a `dist\` by ťahal staré súbory.
+    workspace:
+      clean: all
     steps:
 
     - checkout: self
@@ -108,6 +113,8 @@ stages:
 
   - job: test
     displayName: Automatické testy
+    workspace:
+      clean: all
     steps:
     # `self` (nie `none`) — z konfiguračného repozitára potrebujeme `ci\`.
     - checkout: self
@@ -128,6 +135,8 @@ stages:
 
   - job: docs
     displayName: Kontrola dokumentácie
+    workspace:
+      clean: all
     steps:
     - checkout: self
     - powershell: .\ci\Test-Documentation.ps1 -Version "$(appVersion)"
@@ -147,6 +156,8 @@ stages:
   jobs:
   - job: publish
     displayName: Publikovanie overeného balíka
+    workspace:
+      clean: all
     steps:
     - checkout: none
     - download: current
@@ -168,6 +179,8 @@ stages:
   - deployment: deploy_staging
     displayName: Nasadenie na staging
     environment: Staging          # <- brána: schválenia a kontroly
+    workspace:
+      clean: all
     strategy:
       runOnce:
         deploy:
@@ -192,6 +205,8 @@ stages:
   - deployment: deploy_production
     displayName: Nasadenie do produkcie
     environment: Production       # <- brána: schválenia a kontroly
+    workspace:
+      clean: all
     strategy:
       runOnce:
         deploy:

@@ -28,6 +28,38 @@ fails the build if it doesn't.
 
 ## Pipeline stages
 
+Left to right, one container per stage. Jobs drawn on top of each other inside a
+container run in parallel; the gates between the deployment stages are the
+environment approvals, not steps in this file.
+
+```mermaid
+flowchart LR
+  subgraph S1["1 · Build"]
+    b["Zostavenie aplikácie<br/>version.json → tag → dist/"]
+  end
+  subgraph S2["2 · Overenie — dva joby súbežne"]
+    t["Automatické testy"]
+    d["Kontrola dokumentácie"]
+  end
+  subgraph S3["3 · Publikovanie"]
+    p["Overený artefakt app"]
+  end
+  subgraph S4["4 · Staging"]
+    s["Nasadenie na staging"]
+  end
+  subgraph S5["5 · Produkcia"]
+    pr["Nasadenie do produkcie"]
+  end
+  g1{{"brána — environment Staging"}}
+  g2{{"brána — environment Production"}}
+  b --> t
+  b --> d
+  t --> p
+  d --> p
+  p --> g1 --> s
+  s --> g2 --> pr
+```
+
 | Stage        | What it does                                                          |
 | ------------ | --------------------------------------------------------------------- |
 | `Build`      | Reads `version.json`, clones the vendor tag, produces `dist/`.        |

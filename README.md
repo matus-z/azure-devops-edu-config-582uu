@@ -33,11 +33,11 @@ fails the build if it doesn't.
 | `Build`      | Reads `version.json`, clones the vendor tag, produces `dist/`.        |
 | `Verify`     | Two parallel jobs: `node --test` on the vendor tests, and the docs check. |
 | `Publish`    | Publishes the verified `app` artifact — nothing unverified is published. |
-| `Staging`    | Deployment job on the `staging` environment.                          |
-| `Production` | Deployment job on the `production` environment.                       |
+| `Staging`    | Deployment job on the `Staging` environment.                          |
+| `Production` | Deployment job on the `Production` environment.                       |
 
 Approvals and checks are **not** in this file. They are configured on the
-`staging` and `production` environments in Azure DevOps, which is what makes
+`Staging` and `Production` environments in Azure DevOps, which is what makes
 the run pause for an approver.
 
 `trigger: none` — runs are started by hand, so it is always visible who started one.

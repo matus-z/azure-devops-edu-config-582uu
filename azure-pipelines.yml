@@ -16,7 +16,7 @@ trigger: none          # spúšťame ručne — na workshope chceme vidieť, kto
 pr: none
 
 pool:
-  vmImage: windows-latest
+  name: WinAgentPool-Srv2022
 
 variables:
   vendorRepoUrl: https://dev.azure.com/kooperativa/kalkulacka/_git/kalkulacka-dodavatel
@@ -167,7 +167,7 @@ stages:
   jobs:
   - deployment: deploy_staging
     displayName: Nasadenie na staging
-    environment: staging          # <- brána: schválenia a kontroly
+    environment: Staging          # <- brána: schválenia a kontroly
     strategy:
       runOnce:
         deploy:
@@ -193,7 +193,7 @@ stages:
   jobs:
   - deployment: deploy_production
     displayName: Nasadenie do produkcie
-    environment: production       # <- brána: schválenia a kontroly
+    environment: Production       # <- brána: schválenia a kontroly
     strategy:
       runOnce:
         deploy:

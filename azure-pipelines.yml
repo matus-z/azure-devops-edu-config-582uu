@@ -1,0 +1,207 @@
+# =============================================================================
+#  Kalkulačka poistenia — pipeline (konfiguračný repozitár)
+#
+#  Build → (Testy ‖ Dokumentácia) → Publikovanie → Staging → Produkcia
+#
+#  Verzia dodávateľa sa NEuvádza tu, ale vo `version.json` vedľa tohto súboru:
+#      { "version": "v1.2.1" }
+#
+#  Prečo klonujeme skriptom a nie cez `resources.repositories`:
+#  ref v `resources` sa vyhodnocuje pri kompilácii pipeline, takže sa nedá
+#  načítať zo súboru. Chceme, aby zmena verzie bola zmenou v `version.json`
+#  a nie zmenou pipeline — preto `git clone --branch <tag>`.
+# =============================================================================
+
+trigger: none          # spúšťame ručne — na workshope chceme vidieť, kto beh spustil
+pr: none
+
+pool:
+  vmImage: windows-latest
+
+variables:
+  vendorRepoUrl: https://dev.azure.com/kooperativa/kalkulacka/_git/kalkulacka-dodavatel
+
+stages:
+
+# -----------------------------------------------------------------------------
+# 1. BUILD — načíta verziu, stiahne kód dodávateľa na danom tagu, zostaví
+# -----------------------------------------------------------------------------
+- stage: Build
+  displayName: Build
+  jobs:
+  - job: build
+    displayName: Zostavenie aplikácie
+    steps:
+
+    - checkout: self
+      persistCredentials: true
+
+    - powershell: |
+        if (-not (Test-Path version.json)) {
+          Write-Host "##vso[task.logissue type=error]version.json neexistuje"
+          exit 1
+        }
+        $v = (Get-Content version.json -Raw | ConvertFrom-Json).version
+        if ([string]::IsNullOrWhiteSpace($v)) {
+          Write-Host "##vso[task.logissue type=error]version.json neobsahuje 'version'"
+          exit 1
+        }
+        Write-Host "Verzia dodávateľa: $v"
+        Write-Host "##vso[task.setvariable variable=appVersion;isOutput=true]$v"
+        Write-Host "##vso[build.addbuildtag]$v"
+      name: readVersion
+      displayName: Načítanie verzie z version.json
+
+    # Ak tag neexistuje, tento krok zlyhá hlasne a hneď — to je dobré zlyhanie.
+    - powershell: |
+        $v = "$(readVersion.appVersion)"
+        git clone --depth 1 --branch $v `
+          "https://$(System.AccessToken)@dev.azure.com/kooperativa/kalkulacka/_git/kalkulacka-dodavatel" `
+          vendor
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "##vso[task.logissue type=error]Tag '$v' sa nepodarilo načítať — existuje?"
+          exit 1
+        }
+      displayName: Stiahnutie kódu dodávateľa (tag $(readVersion.appVersion))
+
+    - powershell: |
+        New-Item -ItemType Directory -Force -Path dist | Out-Null
+        Copy-Item vendor\src\* dist\ -Recurse -Force
+        # Verziu zapíšeme do stránky, aby bola viditeľná aj bez otvorenia pipeline
+        (Get-Content dist\index.html -Raw) `
+          -replace '__VERSION__', '$(readVersion.appVersion)' |
+          Set-Content dist\index.html
+        Get-ChildItem dist -Recurse | Select-Object FullName
+      displayName: Build — príprava dist/
+
+    # Medzivýstup pre ďalšie stage. Ešte nie je overený, preto sa nevolá `app`.
+    - publish: dist
+      artifact: build-output
+      displayName: Odovzdanie buildu ďalším stage
+
+# -----------------------------------------------------------------------------
+# 2. VERIFY — dva joby bežia SÚBEŽNE (nemajú medzi sebou dependsOn)
+# -----------------------------------------------------------------------------
+- stage: Verify
+  displayName: Overenie
+  dependsOn: Build
+  variables:
+    appVersion: $[ stageDependencies.Build.build.outputs['readVersion.appVersion'] ]
+  jobs:
+
+  - job: test
+    displayName: Automatické testy
+    steps:
+    - checkout: none
+    - download: current
+      artifact: build-output
+    - powershell: |
+        git clone --depth 1 --branch $(appVersion) `
+          "https://$(System.AccessToken)@dev.azure.com/kooperativa/kalkulacka/_git/kalkulacka-dodavatel" `
+          vendor
+      displayName: Stiahnutie testov
+
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '20.x'
+      displayName: Node.js
+
+    - powershell: |
+        Copy-Item "$(Pipeline.Workspace)\build-output\*" vendor\src\ -Recurse -Force
+        cd vendor
+        node --test --test-reporter=spec tests\
+      displayName: Spustenie testov
+
+  - job: docs
+    displayName: Kontrola dokumentácie
+    steps:
+    - checkout: self
+    - powershell: |
+        $v = "$(appVersion)"
+        $missing = @()
+        if (-not (Test-Path "docs\CHANGELOG.md"))       { $missing += "docs\CHANGELOG.md" }
+        if (-not (Test-Path "docs\popis-zmeny.md"))     { $missing += "docs\popis-zmeny.md" }
+
+        if ($missing.Count -gt 0) {
+          Write-Host "##vso[task.logissue type=error]Chýba: $($missing -join ', ')"
+          exit 1
+        }
+        if (-not (Select-String -Path "docs\CHANGELOG.md" -Pattern ([regex]::Escape($v)) -Quiet)) {
+          Write-Host "##vso[task.logissue type=error]CHANGELOG.md nespomína verziu $v"
+          exit 1
+        }
+        Write-Host "Dokumentácia k verzii $v je na mieste."
+      displayName: Dokumentácia zodpovedá nasadzovanej verzii
+
+    - publish: docs
+      artifact: docs
+      displayName: Publikovanie dokumentácie
+
+# -----------------------------------------------------------------------------
+# 3. PUBLISH — až teraz vzniká artefakt, ktorý si schvaľovateľ stiahne.
+#    Nič neoverené sa nepublikuje.
+# -----------------------------------------------------------------------------
+- stage: Publish
+  displayName: Publikovanie artefaktu
+  dependsOn: Verify
+  jobs:
+  - job: publish
+    displayName: Publikovanie overeného balíka
+    steps:
+    - checkout: none
+    - download: current
+      artifact: build-output
+    - publish: $(Pipeline.Workspace)/build-output
+      artifact: app
+      displayName: Artefakt `app` — na stiahnutie pri schvaľovaní
+
+# -----------------------------------------------------------------------------
+# 4. STAGING — deployment job viazaný na prostredie `staging`
+#    Schválenia a kontroly NIE SÚ tu; sú nastavené na prostredí.
+# -----------------------------------------------------------------------------
+- stage: Staging
+  displayName: Nasadenie na staging
+  dependsOn: Publish
+  variables:
+    appVersion: $[ stageDependencies.Build.build.outputs['readVersion.appVersion'] ]
+  jobs:
+  - deployment: deploy_staging
+    displayName: Nasadenie na staging
+    environment: staging          # <- brána: schválenia a kontroly
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: app
+          - powershell: |
+              Write-Host "Nasadzujem verziu $(appVersion) na STAGING"
+              Get-ChildItem "$(Pipeline.Workspace)\app" -Recurse | Select-Object Name, Length
+              # V ostrej prevádzke tu stojí kopírovanie na SMB share, ktorý je
+              # zároveň priečinkom IIS stránky:
+              # xcopy /E /Y "$(Pipeline.Workspace)\app\*" "\\server\stranka\staging\"
+            displayName: Kopírovanie na staging
+
+# -----------------------------------------------------------------------------
+# 5. PRODUKCIA — druhá brána, drahšia. Schvaľovateľ artefakt otvorí a overí.
+# -----------------------------------------------------------------------------
+- stage: Production
+  displayName: Nasadenie do produkcie
+  dependsOn: Staging
+  variables:
+    appVersion: $[ stageDependencies.Build.build.outputs['readVersion.appVersion'] ]
+  jobs:
+  - deployment: deploy_production
+    displayName: Nasadenie do produkcie
+    environment: production       # <- brána: schválenia a kontroly
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: app
+          - powershell: |
+              Write-Host "Nasadzujem verziu $(appVersion) do PRODUKCIE"
+              Get-ChildItem "$(Pipeline.Workspace)\app" -Recurse | Select-Object Name, Length
+              # xcopy /E /Y "$(Pipeline.Workspace)\app\*" "\\server\stranka\produkcia\"
+            displayName: Kopírovanie do produkcie

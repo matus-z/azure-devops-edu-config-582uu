@@ -13,7 +13,7 @@ edited here.
 | `version.json`          | Which vendor tag gets built — `{ "version": "v1.2.1" }`.            |
 | `docs/CHANGELOG.md`     | Release notes; must mention the version being deployed.            |
 | `docs/popis-zmeny.md`   | Description of the change for the approver.                        |
-| `ci/`                   | PowerShell scripts the pipeline steps call.                        |
+| `ci/`                   | Bash scripts the pipeline steps call.                              |
 
 ## Releasing a version
 
@@ -79,20 +79,39 @@ the run pause for an approver.
 ### `ci/`
 
 Anything longer than a one-liner lives in a script rather than inline in the
-YAML, so it can be run and debugged locally instead of only on an agent.
+YAML, so it can be run and debugged locally — `./ci/test-documentation.sh`
+behaves the same in a shell as it does on the agent.
 
 | Script                   | Called by                          |
 | ------------------------ | ---------------------------------- |
-| `Get-VendorSource.ps1`   | `Build`, `Verify / test`           |
-| `Build-Package.ps1`      | `Build`                            |
-| `Invoke-VendorTests.ps1` | `Verify / test`                    |
-| `Test-Documentation.ps1` | `Verify / docs`                    |
-| `Deploy-Site.ps1`        | `Staging`, `Production`            |
+| `get-vendor-source.sh`   | `Build`, `Verify / test`           |
+| `build-package.sh`       | `Build`                            |
+| `run-vendor-tests.sh`    | `Verify / test`                    |
+| `test-documentation.sh`  | `Verify / docs`                    |
+| `test-node-version.sh`   | `Verify / test`                    |
+| `deploy-site.sh`         | `Staging`, `Production`            |
 
-Names follow PowerShell's `Verb-Noun` convention using approved verbs. Each
-takes parameters instead of reading pipeline variables directly — that is what
-makes them runnable outside CI — and reports failures with
-`##vso[task.logissue type=error]` plus a non-zero exit code.
+The pipeline runs on Linux agents (`Pool1-Linux`) — the same pool as the vendor
+repo. The steps use `bash`, and the only things the agents need installed are
+**Node 20+ and git** — no PowerShell. That is deliberate: these agents are
+on-prem behind a TLS-inspecting proxy, so every runtime dependency the pipeline
+adds is something that has to be installed by hand on each machine and can fail
+to download.
+
+The pipeline does not install Node either — `test-node-version.sh` only checks
+that the agent already has v20 or newer and fails with a clear message if it
+does not. `NodeTool@0` would download it on every run, which is both slow and a
+dependency on internet access the agents may not have.
+
+Steps call the scripts as `bash ./ci/<script>.sh`. Scripts committed through the
+browser arrive without the execute bit, and going through `bash` ignores the
+file mode. `.gitattributes` pins `*.sh` to LF so a CRLF checkout can't break the
+shebang.
+
+Each script uses `set -euo pipefail` and takes long options with sensible
+defaults (`--version`, `--tag`, `--package-path`) instead of reading pipeline
+variables directly — that is what makes them runnable outside CI. Failures are
+reported with `##vso[task.logissue type=error]` plus a non-zero exit code.
 
 Two of them are shared by more than one step, which is the point: the clone and
 the deployment exist once, and staging and production differ only in the
@@ -102,8 +121,12 @@ Reading `version.json` stays inline in the YAML. It sets the stage output
 variable every later stage depends on, and that wiring is easier to follow next
 to the `name: readVersion` that exposes it.
 
-`Deploy-Site.ps1` without `-TargetPath` only lists the package — the workshop
-mode. Adding `-TargetPath \\server\stranka\staging` turns it into a real copy.
+`deploy-site.sh` without `--target-path` only lists the package — the workshop
+mode. Adding `--target-path /var/www/kalkulacka/staging` turns it into a real
+copy.
+
+The trade-off of the move to bash is that the scripts no longer run on a Windows
+workstation as-is — debugging them locally means WSL, macOS, or a Linux box.
 
 ## Not in this repo yet
 

@@ -89,19 +89,29 @@ behaves the same in a shell as it does on the agent.
 | `run-vendor-tests.sh`    | `Verify / test`                    |
 | `test-documentation.sh`  | `Verify / docs`                    |
 | `test-node-version.sh`   | `Verify / test`                    |
+| `use-agent-node.sh`      | `Verify / test`                    |
 | `deploy-site.sh`         | `Staging`, `Production`            |
 
 The pipeline runs on Linux agents (`Pool1-Linux`) — the same pool as the vendor
-repo. The steps use `bash`, and the only things the agents need installed are
-**Node 20+ and git** — no PowerShell. That is deliberate: these agents are
+repo. The steps use `bash`, and the only thing the agents need installed is
+**git** — no PowerShell, and Node comes bundled with the agent (see below). That is deliberate: these agents are
 on-prem behind a TLS-inspecting proxy, so every runtime dependency the pipeline
 adds is something that has to be installed by hand on each machine and can fail
 to download.
 
-The pipeline does not install Node either — `test-node-version.sh` only checks
-that the agent already has v20 or newer and fails with a clear message if it
-does not. `NodeTool@0` would download it on every run, which is both slow and a
-dependency on internet access the agents may not have.
+The pipeline neither downloads nor installs Node. Every Azure Pipelines agent
+ships its own Node under `externals/node*/bin/node` for running tasks, and
+`use-agent-node.sh` puts the newest one that actually runs and is v20 or newer
+on `PATH` for the rest of the job. `test-node-version.sh` then confirms it. Only
+`Verify / test` needs Node — `run-vendor-tests.sh` calls `node --test`.
+
+`NodeTool@0` is not used: it downloads from nodejs.org, and behind the
+TLS-inspecting proxy that fails with *unable to get local issuer certificate*.
+
+The catch is that `externals/` is internal to the agent, not a supported
+interface. An agent too old to bundle Node 20 — or a future agent that lays the
+folder out differently — makes `use-agent-node.sh` fail with a message saying
+so; the fix then is a newer agent or Node installed on the machines.
 
 Steps call the scripts as `bash ./ci/<script>.sh`. Scripts committed through the
 browser arrive without the execute bit, and going through `bash` ignores the

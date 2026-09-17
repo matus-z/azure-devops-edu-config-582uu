@@ -2,11 +2,9 @@
 #
 # Overí, že na agentovi je nainštalovaný Node.js v požadovanej verzii.
 #
-# Node sa na agentov v pooli inštaluje raz, pri príprave stroja — pipeline ho
-# nesťahuje. `NodeTool@0` by ho ťahal z internetu pri každom behu, čo na
-# on-prem agentoch bez konektivity (alebo za TLS proxy) zlyhá.
-#
-# Tento krok preto nič neinštaluje, len overí a vypíše, čo na agentovi je.
+# Node dáva na PATH `use-agent-node.sh`; tento skript nič neinštaluje, len
+# overí a vypíše, čo je na PATH — aby zlá verzia zlyhala tu, a nie až
+# uprostred testov.
 # Ak Node chýba alebo je starý, zlyhá hlasne a s návodom čo urobiť.
 #
 # Použitie:

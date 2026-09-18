@@ -50,15 +50,15 @@ variables:
   # sa až pri klonovaní hlavičkou, aby sa nedostal do logu.
   vendorRepoUrl: https://adoserver.koop.sk/DefaultCollection/EDU/_git/EDU
 
-  # PAT s rozsahom Code (Read) na repozitár dodávateľa. Hodnota TU NEPATRÍ —
+  # PAT s rozsahom Code (Read) na repozitár dodávateľa sa TU NEDEFINUJE —
   # nastavuje sa ako tajná premenná `vendorPat` v nastaveniach pipeline
-  # (Edit → Variables → Keep this value secret). Prázdna hodnota nižšie je len
-  # východisková, nastavenie z UI ju prebije.
+  # (Edit → Variables → Keep this value secret). Zámerne tu nie je ani prázdna
+  # východisková hodnota: na ADO Serveri vie definícia z YAML prebiť tajnú
+  # premennú z UI, a pipeline by potom klonovala bez tokenu.
   #
   # Prečo PAT a nie `System.AccessToken`: v projekte je zapnuté "Limit job
   # authorization scope to current repository", takže token jobu platí len pre
   # tento repozitár a klonovanie repozitára dodávateľa padne na TF401019.
-  vendorPat: ''
 
 stages:
 

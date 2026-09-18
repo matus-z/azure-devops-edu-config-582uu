@@ -7,8 +7,10 @@
 # zo súboru. Vďaka tomu je zmena verzie zmenou vo `version.json`, nie
 # zmenou pipeline.
 #
-# Token sa do adresy vkladá až tu a berie sa z premennej prostredia, aby sa
-# nedostal do príkazového riadku ani do logu. V kroku ho treba namapovať:
+# Token sa neposiela v adrese, ale hlavičkou — `https://<token>@host` dá git
+# token ako používateľské meno, heslo si potom vypýta z terminálu a v pipeline
+# to padne na "terminal prompts disabled". Berie sa z premennej prostredia, aby
+# sa nedostal do logu. V kroku ho treba namapovať:
 #
 #     env:
 #       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
@@ -50,9 +52,9 @@ if [ -z "$access_token" ]; then
   exit 1
 fi
 
-auth_url="${url/https:\/\//https://$access_token@}"
-
-if ! git clone --depth 1 --branch "$tag" "$auth_url" "$destination"; then
+# Rovnako sa autentifikuje aj sám agent pri `checkout`.
+if ! git -c http.extraheader="AUTHORIZATION: bearer $access_token" \
+       clone --depth 1 --branch "$tag" "$url" "$destination"; then
   echo "##vso[task.logissue type=error]Tag '$tag' sa nepodarilo načítať — existuje?"
   exit 1
 fi

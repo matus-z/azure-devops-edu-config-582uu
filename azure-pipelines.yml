@@ -46,10 +46,19 @@ pool:
   name: Pool1-Linux
 
 variables:
-  # Adresa repozitára dodávateľa na jednom mieste. Token sa do nej vkladá až
-  # pri klonovaní (`$(System.AccessToken)` za `https://`), aby sa nedostal do
-  # premennej ani do logu.
+  # Adresa repozitára dodávateľa na jednom mieste. Token v nej nie je — posiela
+  # sa až pri klonovaní hlavičkou, aby sa nedostal do logu.
   vendorRepoUrl: https://adoserver.koop.sk/DefaultCollection/EDU/_git/EDU
+
+  # PAT s rozsahom Code (Read) na repozitár dodávateľa. Hodnota TU NEPATRÍ —
+  # nastavuje sa ako tajná premenná `vendorPat` v nastaveniach pipeline
+  # (Edit → Variables → Keep this value secret). Prázdna hodnota nižšie je len
+  # východisková, nastavenie z UI ju prebije.
+  #
+  # Prečo PAT a nie `System.AccessToken`: v projekte je zapnuté "Limit job
+  # authorization scope to current repository", takže token jobu platí len pre
+  # tento repozitár a klonovanie repozitára dodávateľa padne na TF401019.
+  vendorPat: ''
 
 stages:
 
@@ -91,7 +100,7 @@ stages:
     # Ak tag neexistuje, tento krok zlyhá hlasne a hneď — to je dobré zlyhanie.
     - bash: bash ./ci/get-vendor-source.sh --url "$(vendorRepoUrl)" --tag "$(readVersion.appVersion)"
       env:
-        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        VENDOR_TOKEN: $(vendorPat)
       displayName: Stiahnutie kódu dodávateľa (tag $(readVersion.appVersion))
 
     - bash: bash ./ci/build-package.sh --version "$(readVersion.appVersion)"
@@ -123,7 +132,7 @@ stages:
       artifact: build-output
     - bash: bash ./ci/get-vendor-source.sh --url "$(vendorRepoUrl)" --tag "$(appVersion)"
       env:
-        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        VENDOR_TOKEN: $(vendorPat)
       displayName: Stiahnutie testov
 
     # Node sa nesťahuje: použije sa ten, ktorý je pribalený k agentovi.

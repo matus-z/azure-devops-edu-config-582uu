@@ -107,9 +107,15 @@ stages:
       displayName: Build — príprava dist/
 
     # Medzivýstup pre ďalšie stage. Ešte nie je overený, preto sa nevolá `app`.
-    - publish: dist
-      artifact: build-output
+    #
+    # Používame staré build artefakty (file container), nie `publish`/`download`
+    # (Pipeline Artifacts): tie Azure DevOps Server nepozná a krok zlyhá na
+    # "Pipeline artifact is not supported in on-premises".
+    - task: PublishBuildArtifacts@1
       displayName: Odovzdanie buildu ďalším stage
+      inputs:
+        pathToPublish: dist
+        artifactName: build-output
 
 # -----------------------------------------------------------------------------
 # 2. VERIFY — dva joby bežia SÚBEŽNE (nemajú medzi sebou dependsOn)
@@ -128,8 +134,12 @@ stages:
     steps:
     # `self` (nie `none`) — z konfiguračného repozitára potrebujeme `ci/`.
     - checkout: self
-    - download: current
-      artifact: build-output
+    - task: DownloadBuildArtifacts@0
+      displayName: Stiahnutie buildu
+      inputs:
+        buildType: current
+        artifactName: build-output
+        downloadPath: $(Agent.BuildDirectory)
     - bash: bash ./ci/get-vendor-source.sh --url "$(vendorRepoUrl)" --tag "$(appVersion)"
       env:
         VENDOR_TOKEN: $(vendorPat)
@@ -144,7 +154,7 @@ stages:
     - bash: bash ./ci/test-node-version.sh --minimum-major 20
       displayName: Kontrola — Node.js na agentovi
 
-    - bash: bash ./ci/run-vendor-tests.sh --package-path "$(Pipeline.Workspace)/build-output"
+    - bash: bash ./ci/run-vendor-tests.sh --package-path "$(Agent.BuildDirectory)/build-output"
       displayName: Spustenie testov
 
   - job: docs
@@ -156,9 +166,11 @@ stages:
     - bash: bash ./ci/test-documentation.sh --version "$(appVersion)"
       displayName: Dokumentácia zodpovedá nasadzovanej verzii
 
-    - publish: docs
-      artifact: docs
+    - task: PublishBuildArtifacts@1
       displayName: Publikovanie dokumentácie
+      inputs:
+        pathToPublish: docs
+        artifactName: docs
 
 # -----------------------------------------------------------------------------
 # 3. PUBLISH — až teraz vzniká artefakt, ktorý si schvaľovateľ stiahne.
@@ -174,11 +186,17 @@ stages:
       clean: all
     steps:
     - checkout: none
-    - download: current
-      artifact: build-output
-    - publish: $(Pipeline.Workspace)/build-output
-      artifact: app
+    - task: DownloadBuildArtifacts@0
+      displayName: Stiahnutie overeného buildu
+      inputs:
+        buildType: current
+        artifactName: build-output
+        downloadPath: $(Agent.BuildDirectory)
+    - task: PublishBuildArtifacts@1
       displayName: Artefakt `app` — na stiahnutie pri schvaľovaní
+      inputs:
+        pathToPublish: $(Agent.BuildDirectory)/build-output
+        artifactName: app
 
 # -----------------------------------------------------------------------------
 # 4. STAGING — deployment job viazaný na prostredie `staging`
@@ -201,10 +219,18 @@ stages:
           steps:
           # deployment job sám o sebe repozitár nesťahuje — `ci/` si vypýtame.
           - checkout: self
-          - download: current
-            artifact: app
+          # Deployment job si štandardne sám stiahne pipeline artefakty — to
+          # on-prem nefunguje, tak implicitné sťahovanie vypneme a artefakt
+          # stiahneme klasickou úlohou.
+          - download: none
+          - task: DownloadBuildArtifacts@0
+            displayName: Stiahnutie artefaktu app
+            inputs:
+              buildType: current
+              artifactName: app
+              downloadPath: $(Agent.BuildDirectory)
           # V ostrej prevádzke doplniť: --target-path /var/www/kalkulacka/staging
-          - bash: bash ./ci/deploy-site.sh --version "$(appVersion)" --environment-name STAGING --package-path "$(Pipeline.Workspace)/app"
+          - bash: bash ./ci/deploy-site.sh --version "$(appVersion)" --environment-name STAGING --package-path "$(Agent.BuildDirectory)/app"
             displayName: Kopírovanie na staging
 
 # -----------------------------------------------------------------------------
@@ -227,8 +253,16 @@ stages:
           steps:
           # deployment job sám o sebe repozitár nesťahuje — `ci/` si vypýtame.
           - checkout: self
-          - download: current
-            artifact: app
+          # Deployment job si štandardne sám stiahne pipeline artefakty — to
+          # on-prem nefunguje, tak implicitné sťahovanie vypneme a artefakt
+          # stiahneme klasickou úlohou.
+          - download: none
+          - task: DownloadBuildArtifacts@0
+            displayName: Stiahnutie artefaktu app
+            inputs:
+              buildType: current
+              artifactName: app
+              downloadPath: $(Agent.BuildDirectory)
           # V ostrej prevádzke doplniť: --target-path /var/www/kalkulacka/produkcia
-          - bash: bash ./ci/deploy-site.sh --version "$(appVersion)" --environment-name PRODUKCIA --package-path "$(Pipeline.Workspace)/app"
+          - bash: bash ./ci/deploy-site.sh --version "$(appVersion)" --environment-name PRODUKCIA --package-path "$(Agent.BuildDirectory)/app"
             displayName: Kopírovanie do produkcie

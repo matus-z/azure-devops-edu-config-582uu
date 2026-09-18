@@ -14,7 +14,7 @@
 #       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 #
 # Použitie:
-#   ./ci/get-vendor-source.sh --url https://adoserver.koop.sk/DefaultCollection/EDU/_git/Dev --tag v1.2.1
+#   ./ci/get-vendor-source.sh --url https://adoserver.koop.sk/DefaultCollection/EDU/_git/EDU --tag v1.2.1
 
 set -euo pipefail
 

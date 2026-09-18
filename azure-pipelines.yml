@@ -49,7 +49,7 @@ variables:
   # Adresa repozitára dodávateľa na jednom mieste. Token sa do nej vkladá až
   # pri klonovaní (`$(System.AccessToken)` za `https://`), aby sa nedostal do
   # premennej ani do logu.
-  vendorRepoUrl: https://adoserver.koop.sk/DefaultCollection/EDU/_git/Dev
+  vendorRepoUrl: https://adoserver.koop.sk/DefaultCollection/EDU/_git/EDU
 
 stages:
 
